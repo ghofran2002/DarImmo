@@ -3,11 +3,6 @@ const bcrypt = require('bcryptjs');
 
 /**
  * Modèle User — représente un utilisateur de la plateforme DarImmo.
- *
- * Rôles :
- *  - user  : cherche des biens
- *  - agent : publie et gère des annonces
- *  - admin : administrateur
  */
 const userSchema = new mongoose.Schema(
   {
@@ -21,8 +16,8 @@ const userSchema = new mongoose.Schema(
     email: {
       type: String,
       required: [true, "L'email est obligatoire"],
-      unique: true,           // pas deux users avec le même email
-      lowercase: true,        // toujours en minuscules
+      unique: true,
+      lowercase: true,
       trim: true,
       match: [
         /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
@@ -33,12 +28,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Le mot de passe est obligatoire'],
       minlength: [6, 'Le mot de passe doit contenir au moins 6 caractères'],
-      select: false,          // ne pas renvoyer le password par défaut
+      select: false,
     },
     phone: {
       type: String,
       trim: true,
-      
     },
     role: {
       type: String,
@@ -49,29 +43,31 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // ⚠️ AJOUT POUR FIREBASE
+    fcmTokens: [
+      {
+        token: { type: String, required: true },
+        device: { type: String, default: 'unknown' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
-    timestamps: true, // createdAt + updatedAt automatiques
+    timestamps: true,
   }
 );
 
-// ============================================
-// HOOK pre('save') — hash le mot de passe avant insertion
-// ============================================
+// Hook pre('save') — hash le mot de passe
 userSchema.pre('save', async function (next) {
-  // Si le password n'a pas été modifié, on ne re-hash pas
   if (!this.isModified('password')) {
     return next();
   }
-
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-// ============================================
-// MÉTHODE matchPassword — compare mot de passe saisi vs hashé
-// ============================================
+// Méthode matchPassword
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

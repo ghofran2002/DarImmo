@@ -60,5 +60,34 @@ const markAllAsRead = asyncHandler(async (req, res) => {
     data: {},
   });
 });
+const User = require('../models/User'); // ⚠️ Ajoute cet import en haut
 
-module.exports = { getMyNotifications, markAsRead, markAllAsRead };
+// @desc    Enregistrer un token d'appareil
+// @route   POST /api/notifications/device-token
+// @access  Private
+const registerDeviceToken = asyncHandler(async (req, res) => {
+  const { token, device } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ success: false, message: 'Le token est obligatoire', errors: [] });
+  }
+
+  const user = await User.findById(req.user._id);
+
+  const existingToken = user.fcmTokens.find((t) => t.token === token);
+  
+  if (existingToken) {
+    existingToken.createdAt = new Date();
+  } else {
+    user.fcmTokens.push({ token, device: device || 'unknown' });
+  }
+
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Token d'appareil enregistré avec succès",
+    data: { tokensCount: user.fcmTokens.length },
+  });
+});
+module.exports = { getMyNotifications, markAsRead, markAllAsRead , registerDeviceToken};
