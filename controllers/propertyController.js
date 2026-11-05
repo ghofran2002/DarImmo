@@ -1,11 +1,13 @@
 const Property = require('../models/Property');
 const asyncHandler = require('../utils/asyncHandler');
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // @desc    Créer une annonce
 // @route   POST /api/properties
 // @access  Private
 const createProperty = asyncHandler(async (req, res) => {
-  const propertyData = { ...req.body, owner: req.user._id };
+  const propertyData = { ...req.body, owner: req.user._id, status: 'pending' };
   const property = await Property.create(propertyData);
 
   res.status(201).json({
@@ -20,45 +22,61 @@ const createProperty = asyncHandler(async (req, res) => {
 // @route   GET /api/properties
 // @access  Public
 const getAllProperties = asyncHandler(async (req, res) => {
-  // 1. Construction de la requête (Query)
-  const queryObj = { ...req.query };
-
-  // Champs à exclure de la recherche directe (ils servent à autre chose)
-  const excludedFields = ['page', 'sort', 'limit', 'search', 'minPrice', 'maxPrice'];
-  excludedFields.forEach((field) => delete queryObj[field]);
-
-  // Par défaut, on ne montre que les annonces approuvées
-  queryObj.status = 'approved'; 
+  const queryObj = { status: 'approved' };
+  const allowedFilters = ['city', 'type', 'transactionType'];
+  allowedFilters.forEach((field) => {
+    if (typeof req.query[field] === 'string' && req.query[field].trim()) {
+      queryObj[field] = req.query[field].trim();
+    }
+  });
 
   // 2. Recherche par mot-clé (titre ou description)
-  if (req.query.search) {
+  if (typeof req.query.search === 'string' && req.query.search.trim()) {
+    const search = escapeRegex(req.query.search.trim());
     queryObj.$or = [
-      { title: { $regex: req.query.search, $options: 'i' } },
-      { description: { $regex: req.query.search, $options: 'i' } },
+      { title: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } },
     ];
   }
 
   // 3. Filtre par prix (min et max)
-  if (req.query.minPrice || req.query.maxPrice) {
+  const minPrice = req.query.minPrice === undefined ? undefined : Number(req.query.minPrice);
+  const maxPrice = req.query.maxPrice === undefined ? undefined : Number(req.query.maxPrice);
+  if (
+    (minPrice !== undefined && (!Number.isFinite(minPrice) || minPrice < 0)) ||
+    (maxPrice !== undefined && (!Number.isFinite(maxPrice) || maxPrice < 0)) ||
+    (minPrice !== undefined && maxPrice !== undefined && minPrice > maxPrice)
+  ) {
+    return res.status(400).json({ success: false, message: 'Filtres de prix invalides', errors: [] });
+  }
+  if (minPrice !== undefined || maxPrice !== undefined) {
     queryObj.price = {};
-    if (req.query.minPrice) queryObj.price.$gte = Number(req.query.minPrice);
-    if (req.query.maxPrice) queryObj.price.$lte = Number(req.query.maxPrice);
+    if (minPrice !== undefined) queryObj.price.$gte = minPrice;
+    if (maxPrice !== undefined) queryObj.price.$lte = maxPrice;
   }
 
   // 4. Exécution de la requête
   let query = Property.find(queryObj).populate('owner', 'name email');
 
   // 5. Tri (ex: ?sort=price, ?sort=-price, ?sort=createdAt)
-  if (req.query.sort) {
-    const sortBy = req.query.sort.split(',').join(' ');
+  if (typeof req.query.sort === 'string' && req.query.sort.trim()) {
+    const sortFields = req.query.sort.split(',').map((field) => field.trim());
+    const allowedSortFields = new Set(['price', 'createdAt', 'surface', 'title']);
+    if (sortFields.some((field) => !allowedSortFields.has(field.replace(/^-/, '')))) {
+      return res.status(400).json({ success: false, message: 'Paramètre de tri invalide', errors: [] });
+    }
+    const sortBy = sortFields.join(' ');
     query = query.sort(sortBy);
   } else {
     query = query.sort('-createdAt'); // Par défaut : les plus récentes d'abord
   }
 
   // 6. Pagination
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 10;
+  const page = Number.parseInt(req.query.page, 10) || 1;
+  const limit = Number.parseInt(req.query.limit, 10) || 10;
+  if (page < 1 || limit < 1 || limit > 100) {
+    return res.status(400).json({ success: false, message: 'Paramètres de pagination invalides', errors: [] });
+  }
   const skip = (page - 1) * limit;
 
   query = query.skip(skip).limit(limit);
@@ -110,6 +128,8 @@ const updateProperty = asyncHandler(async (req, res) => {
 
   // Empêcher la modification du propriétaire
   delete req.body.owner;
+  delete req.body.status;
+  delete req.body.images;
 
   property = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
 
@@ -153,7 +173,16 @@ const getNearbyProperties = asyncHandler(async (req, res) => {
   const latitude = parseFloat(lat);
   const maxDistance = parseFloat(distance);
 
-  if (isNaN(longitude) || isNaN(latitude) || isNaN(maxDistance)) {
+  if (
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(maxDistance) ||
+    longitude < -180 ||
+    longitude > 180 ||
+    latitude < -90 ||
+    latitude > 90 ||
+    maxDistance <= 0
+  ) {
     return res.status(400).json({
       success: false,
       message: 'Les paramètres doivent être des nombres valides',
@@ -202,6 +231,14 @@ const uploadImages = asyncHandler(async (req, res) => {
 
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ success: false, message: 'Aucune image fournie', errors: [] });
+  }
+
+  if (property.images.length + req.files.length > 5) {
+    return res.status(400).json({
+      success: false,
+      message: 'Une annonce ne peut pas contenir plus de 5 images',
+      errors: [],
+    });
   }
 
   // Construire le tableau d'images

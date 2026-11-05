@@ -1,12 +1,27 @@
+const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const Property = require('../models/Property');
 const asyncHandler = require('../utils/asyncHandler');
+const { sendPushNotification } = require('../services/notificationService');
 
 // @desc    Envoyer un message
 // @route   POST /api/messages
 // @access  Private
 const sendMessage = asyncHandler(async (req, res) => {
   const { receiver, property, content } = req.body;
+
+  if (!receiver || !mongoose.isValidObjectId(receiver)) {
+    return res.status(400).json({ success: false, message: 'Identifiant du destinataire invalide', errors: [] });
+  }
+
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    return res.status(400).json({ success: false, message: 'Le message ne peut pas être vide', errors: [] });
+  }
+
+  if (content.trim().length > 1000) {
+    return res.status(400).json({ success: false, message: 'Le message ne peut pas dépasser 1000 caractères', errors: [] });
+  }
 
   // Vérifier que le destinataire existe
   const receiverExists = await User.findById(receiver);
@@ -19,11 +34,29 @@ const sendMessage = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Vous ne pouvez pas vous envoyer un message à vous-même', errors: [] });
   }
 
+  if (property !== undefined && property !== null && !mongoose.isValidObjectId(property)) {
+    return res.status(400).json({ success: false, message: "Identifiant d'annonce invalide", errors: [] });
+  }
+
+  if (property) {
+    const propertyExists = await Property.exists({ _id: property });
+    if (!propertyExists) {
+      return res.status(404).json({ success: false, message: 'Annonce introuvable', errors: [] });
+    }
+  }
+
   const message = await Message.create({
     sender: req.user._id,
     receiver,
     property: property || null,
-    content,
+    content: content.trim(),
+  });
+
+  await sendPushNotification(receiver, {
+    title: 'Nouveau message',
+    body: `${req.user.name} vous a envoyé un message.`,
+    type: 'message',
+    data: { messageId: message._id.toString(), senderId: req.user._id.toString() },
   });
 
   res.status(201).json({
@@ -38,6 +71,15 @@ const sendMessage = asyncHandler(async (req, res) => {
 // @access  Private
 const getConversation = asyncHandler(async (req, res) => {
   const { userId } = req.params;
+
+  if (!mongoose.isValidObjectId(userId)) {
+    return res.status(400).json({ success: false, message: 'Identifiant utilisateur invalide', errors: [] });
+  }
+
+  const userExists = await User.exists({ _id: userId });
+  if (!userExists) {
+    return res.status(404).json({ success: false, message: 'Utilisateur introuvable', errors: [] });
+  }
 
   // Récupérer les messages entre les deux utilisateurs (dans les deux sens)
   const messages = await Message.find({
