@@ -1,0 +1,27 @@
+# Dépendances
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Variables d'environnement — JAMAIS versionnées
+.env
+.env.local
+.env.*.local
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# VS Code (optionnel)
+# .vscode/
+
+# Build / coverage
+dist/
+build/
+coverage/
