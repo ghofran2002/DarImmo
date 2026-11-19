@@ -1,0 +1,38 @@
+const mongoose = require('mongoose');
+
+const notificationSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    type: {
+      type: String,
+      required: true,
+      enum: ['message', 'property_approved', 'property_rejected', 'new_property', 'favorite_update'],
+    },
+    title: {
+      type: String,
+      required: true,
+    },
+    message: {
+      type: String,
+      required: true,
+    },
+    data: {
+      type: mongoose.Schema.Types.Mixed, // Données supplémentaires (ex: propertyId, messageId)
+      default: {},
+    },
+    read: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
+);
+
+notificationSchema.index({ user: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, read: 1 });
+
+module.exports = mongoose.model('Notification', notificationSchema);
